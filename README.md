@@ -46,9 +46,11 @@ At runtime, the app links the selected vector store to the assistant, so the ass
 ```text
 OpenAI/
   app.py                # Streamlit RAG chat UI
+  app_streamlit_backup.py # Backup of the Streamlit app (safe revert)
   openai_1.ipynb         # Notebook for creating/managing vector stores and uploading documents
   course_outlines/       # Example document directory
   requirements.txt       # Python dependencies
+  web/                   # Next.js (React) frontend + server API routes
   .gitignore             # Excludes .env, .venv, and API keys directory
   .env                   # Local config (not committed)
 ```
@@ -101,6 +103,17 @@ OPENAI_MODEL_EMBEDDING=text-embedding-3-small
 VECTOR_STORE_ID=vs_...
 ```
 
+### React (Next.js) environment
+
+The React app runs from `web/` and uses Next.js API routes (server-side) to call OpenAI securely.
+
+Create `web/.env.local` (or copy `web/.env.local.example`):
+
+```env
+OPENAI_API_KEY=your_api_key_here
+OPENAI_MODEL=gpt-4o-mini
+```
+
 ### Model selection and cost
 
 - The app reads `OPENAI_MODEL`.
@@ -126,6 +139,14 @@ python -m venv .venv
 
 ```bash
 python -m pip install -r requirements.txt
+```
+
+### Install React (Next.js) dependencies
+
+From inside the `web/` directory:
+
+```bash
+npm install
 ```
 
 ---
@@ -159,13 +180,31 @@ FILE_PATHS = [
 
 ## 7) Running the application
 
-Run Streamlit (recommended):
+### Option A: Streamlit app
+
+Run Streamlit:
 
 ```bash
 streamlit run app.py
 ```
 
 Open the local URL printed by Streamlit.
+
+If you want to revert to the backup copy:
+
+```bash
+streamlit run app_streamlit_backup.py
+```
+
+### Option B: React (Next.js) app
+
+From inside the `web/` directory:
+
+```bash
+npm run dev
+```
+
+Then open the local URL printed by Next.js (typically `http://localhost:3000`).
 
 ### Important note
 
