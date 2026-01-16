@@ -9,8 +9,23 @@ import os
 from dotenv import load_dotenv
 import time
 
+try:
+    from streamlit.runtime.scriptrunner import get_script_run_ctx
+except Exception:
+    get_script_run_ctx = None
+
 # Load environment variables
 load_dotenv()
+
+if __name__ == "__main__" and get_script_run_ctx is not None and get_script_run_ctx() is None:
+    print("This is a Streamlit app. Run it with:")
+    print("  streamlit run app.py")
+    raise SystemExit(0)
+
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    st.error("OPENAI_API_KEY is not set. Add it to your .env file before running the app.")
+    st.stop()
 
 # Page configuration
 st.set_page_config(
@@ -55,11 +70,12 @@ st.markdown("""
 @st.cache_resource
 def get_openai_client():
     """Initialize and return OpenAI client"""
-    return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    return OpenAI(api_key=api_key)
 
 client = get_openai_client()
 
 # Get model from env, with fallback for Assistants API compatibility
+# Cost-focused default: gpt-3.5-turbo
 env_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 # List of models supported by Assistants API
@@ -73,12 +89,12 @@ SUPPORTED_ASSISTANT_MODELS = [
 ]
 
 # Use a compatible model for Assistants API
-if env_model in SUPPORTED_ASSISTANT_MODELS:
-    model_chat = env_model
+if env_model not in SUPPORTED_ASSISTANT_MODELS:
+    # Fallback to gpt-3.5-turbo if the env model is not supported
+    st.warning(f"Model '{env_model}' not supported. Using 'gpt-3.5-turbo'.")
+    model_chat = "gpt-3.5-turbo"
 else:
-    # Fallback to gpt-4o-mini if the env model is not supported
-    model_chat = "gpt-4o-mini"
-    st.info(f"ℹ️ Model '{env_model}' is not supported by Assistants API. Using '{model_chat}' instead.")
+    model_chat = env_model
 
 # Initialize session state
 if "messages" not in st.session_state:
@@ -92,6 +108,9 @@ if "thread_id" not in st.session_state:
 
 if "selected_vector_store" not in st.session_state:
     st.session_state.selected_vector_store = None
+
+if "pending_prompt" not in st.session_state:
+    st.session_state.pending_prompt = None
 
 # Fetch vector stores
 @st.cache_data(ttl=60)
@@ -113,12 +132,9 @@ def create_assistant(vector_store_id, vector_store_name):
             instructions=f"""You are a knowledgeable AI assistant with access to documents in the '{vector_store_name}' knowledge base.
             
 Your role is to:
-- Provide accurate, detailed answers based on the documents in the knowledge base
-- Cite specific sources when applicable
-- Be clear when information is not available in the knowledge base
-- Maintain a helpful, professional, and friendly tone
-- Provide well-structured responses with proper formatting
-- Be concise and to the point and brief 
+- Strictly provide accurate, detailed answers based on the documents in the knowledge base only and nothing else.
+- Strictly decline to answer any questions that are not related to the documents in the knowledge base.
+- Your response should be well crafted and easy to understand.
 
 Always prioritize accuracy and cite your sources when answering questions.""",
             model=model_chat,
@@ -176,17 +192,52 @@ def get_assistant_response(thread_id, assistant_id, user_message):
             
             # Get the latest assistant message
             for message in messages.data:
-                if message.role == "assistant":
-                    for content in message.content:
-                        if content.type == 'text':
-                            return content.text.value
+                if message.role != "assistant":
+                    continue
+                for content in message.content:
+                    if content.type == 'text':
+                        return content.text.value
             
             return "I couldn't generate a response. Please try again."
-        else:
-            return f"Error: Run failed with status {run.status}"
+        if run.status == 'failed':
+            return "Error: The assistant run failed. Please try again."
+
+        if run.status == 'cancelled':
+            return "Error: The assistant run was cancelled. Please try again."
+
+        if run.status == 'expired':
+            return "Error: The assistant run expired. Please try again."
+
+        if run.status == 'requires_action':
+            return "Error: The assistant requires additional action to continue."
+
+        return f"Error: Run ended with status {run.status}"
             
     except Exception as e:
         return f"Error getting response: {str(e)}"
+
+def reset_chat_session():
+    """Reset the chat session by creating a new thread and clearing messages."""
+    st.session_state.messages = []
+    st.session_state.thread_id = create_thread()
+
+
+def handle_user_prompt(prompt: str):
+    """Handle a user prompt (typed or suggested) and append assistant response."""
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        response = get_assistant_response(
+            st.session_state.thread_id,
+            st.session_state.assistant_id,
+            prompt,
+        )
+        st.markdown(response)
+
+    st.session_state.messages.append({"role": "assistant", "content": response})
 
 # Sidebar
 with st.sidebar:
@@ -227,21 +278,16 @@ with st.sidebar:
             if st.session_state.assistant_id:
                 try:
                     client.beta.assistants.delete(st.session_state.assistant_id)
-                except:
+                except Exception:
                     pass
             
-            # Create new assistant
+            # Create new assistant and thread
             with st.spinner("Initializing assistant..."):
                 st.session_state.assistant_id = create_assistant(
                     selected_store.id, 
                     selected_store.name
                 )
-                
-                # Create new thread
-                st.session_state.thread_id = create_thread()
-                
-                # Clear chat history when switching stores
-                st.session_state.messages = []
+                reset_chat_session()
             
             st.success("✅ Assistant ready!")
         
@@ -252,18 +298,14 @@ with st.sidebar:
     
     # Model info
     st.subheader("🤖 Model")
-    if model_chat != env_model:
-        st.info(f"**Active Model:** {model_chat}\n\n⚠️ Using fallback ('{env_model}' not supported)")
-    else:
-        st.info(f"**Active Model:** {model_chat}")
+    st.info(f"**Active Model:** {model_chat}")
     
     st.divider()
     
     # Clear chat button
     if st.button("🗑️ Clear Chat History", use_container_width=True):
-        st.session_state.messages = []
         if st.session_state.thread_id:
-            st.session_state.thread_id = create_thread()
+            reset_chat_session()
         st.rerun()
     
     st.divider()
@@ -302,25 +344,15 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+# If a suggested question was clicked, process it like a normal chat prompt
+if st.session_state.pending_prompt:
+    pending = st.session_state.pending_prompt
+    st.session_state.pending_prompt = None
+    handle_user_prompt(pending)
+
 # Chat input
 if prompt := st.chat_input("Ask me anything about your documents..."):
-    # Add user message to chat
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    
-    # Get assistant response
-    with st.chat_message("assistant"):
-        response = get_assistant_response(
-            st.session_state.thread_id,
-            st.session_state.assistant_id,
-            prompt
-        )
-        st.markdown(response)
-    
-    # Add assistant response to chat history
-    st.session_state.messages.append({"role": "assistant", "content": response})
+    handle_user_prompt(prompt)
 
 # Welcome message if chat is empty
 if len(st.session_state.messages) == 0:
@@ -328,12 +360,17 @@ if len(st.session_state.messages) == 0:
     
     # Suggested questions
     st.subheader("💡 Suggested Questions")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("📋 What topics are covered?", use_container_width=True):
-            st.rerun()
-    
-    with col2:
-        if st.button("🎯 What are the learning objectives?", use_container_width=True):
+
+    # Display suggested questions in a more compact way
+    questions = [
+        "📋 What topics are covered in the documents?",
+        "🎯 What are the key learning objectives?",
+        "📄 Can you provide a summary of the main document?",
+        "🔑 What are the most important concepts?"
+    ]
+
+    cols = st.columns(2)
+    for i, question in enumerate(questions):
+        if cols[i % 2].button(question, use_container_width=True):
+            st.session_state.pending_prompt = question
             st.rerun()
