@@ -42,11 +42,11 @@ st.markdown("""
         --brand: #0b3d91;
         --brand-2: #0a2a63;
         --accent: #f5b301;
-        --bg: #ffffff;
-        --panel: #f8fafc;
-        --border: rgba(2, 6, 23, 0.10);
-        --text: #0b1220;
-        --muted: rgba(11, 18, 32, 0.62);
+        --bg: #020617;
+        --panel: #020617;
+        --border: rgba(148, 163, 184, 0.35);
+        --text: #e5e7eb;
+        --muted: rgba(148, 163, 184, 0.82);
     }
 
     .main {
@@ -95,7 +95,7 @@ st.markdown("""
         border-radius: 999px;
         background: rgba(245, 179, 1, 0.16);
         border: 1px solid rgba(245, 179, 1, 0.28);
-        color: var(--brand-2);
+        color: var(--text);
         font-weight: 700;
         font-size: 0.8rem;
         margin-top: 0.75rem;
@@ -111,23 +111,31 @@ st.markdown("""
 
     .stChatMessage {
         padding: 1rem;
-        border-radius: 0.5rem;
+        border-radius: 0.75rem;
         margin-bottom: 1rem;
     }
 
+    /* Ensure all markdown text (including assistant answers, hero copy, etc.)
+       uses the light text color for readability on dark background. */
+    [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] li {
+        color: var(--text);
+    }
+
     .stChatMessage [data-testid="stMarkdownContainer"] p {
-        line-height: 1.55;
+        line-height: 1.6;
         font-size: 0.98rem;
     }
 
     [data-testid="stChatMessage"] {
         border: 1px solid var(--border);
-        background: #ffffff;
-        box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+        background: #020617;
+        box-shadow: 0 1px 0 rgba(15, 23, 42, 0.5);
+        color: var(--text);
     }
 
     [data-testid="stChatMessage"][data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
-        background: rgba(11, 61, 145, 0.05);
+        background: rgba(15, 23, 42, 0.9);
     }
 
     .st-emotion-cache-1v0mbdj {
@@ -141,7 +149,8 @@ st.markdown("""
 
     [data-testid="stSidebar"] {
         border-right: 1px solid var(--border);
-        background: #ffffff;
+        background: #020617;
+        color: var(--text);
     }
 
     [data-testid="stSidebar"] .block-container {
@@ -168,6 +177,8 @@ st.markdown("""
     [data-testid="stChatInput"] textarea {
         border-radius: 14px;
         border: 1px solid var(--border);
+        background: #020617;
+        color: var(--text);
     }
 
     .stAlert {
@@ -180,6 +191,11 @@ st.markdown("""
         border-radius: 10px;
         border-left: 4px solid var(--brand);
         margin-bottom: 1rem;
+        color: var(--text);
+    }
+
+    .vector-store-info strong {
+        color: var(--text);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -362,8 +378,8 @@ with st.sidebar:
     st.markdown(
         """
         <div class="pu-card">
-            <div style="font-weight:800; font-size:1.05rem; color:#0f172a;">Pentecost University</div>
-            <div style="color: rgba(15, 23, 42, 0.65); margin-top: 0.15rem; font-size:0.92rem;">
+            <div style="font-weight:800; font-size:1.05rem; color: var(--text);">Pentecost University</div>
+            <div style="color: var(--muted); margin-top: 0.15rem; font-size:0.92rem;">
                 RAG Proof of Concept
             </div>
         </div>
