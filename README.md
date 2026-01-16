@@ -48,7 +48,7 @@ OpenAI/
   streamlit_app.py        # Streamlit RAG chat UI
   notebooks/
     openai_1.ipynb        # Notebook for creating/managing vector stores and uploading documents
-  scripts/                # Helper scripts for managing the PU Repo vector store
+  scripts/                # Helper scripts for managing the Pentecost University Statute vector store
   pu_repo/               # Pentecost University document repository (knowledge base sources)
   requirements.txt       # Python dependencies
   web/                   # (Optional) Next.js (React) frontend – not covered in this README
@@ -140,16 +140,16 @@ The Streamlit app only queries vector stores that already exist in your OpenAI a
 Use `notebooks/openai_1.ipynb` to:
 
 - List and optionally delete old vector stores created during experimentation
-- Create or retrieve the main **`PU Repo`** vector store
-- Upload local documents from the `pu_repo/` folder and attach them to `PU Repo`
+- Create or retrieve the main **`Pentecost University Statute`** vector store
+- Upload local documents from the `pu_repo/` folder and attach them to `Pentecost University Statute`
 - Clear and re-add files (useful when refreshing content)
 
-### Common workflow (PU Repo)
+### Common workflow (Pentecost University Statute)
 
 1. Open `notebooks/openai_1.ipynb`.
 2. Run cells from the top until the helpers are defined.
 3. (Optional) Run the **danger** cell that lists vector stores and, if you set `CONFIRM_DELETE = True`, deletes the old ones (for example `Course outlines` or `my-knowledge-base`).
-4. Run the "Creating a vector store" cell to create or select the `PU Repo` vector store.
+4. Run the "Creating a vector store" cell to create or select the `Pentecost University Statute` vector store.
 5. Upload documents by either:
 
    ```python
@@ -160,7 +160,7 @@ Use `notebooks/openai_1.ipynb` to:
 
    or by using the "clear + re-add" cell to sync **all** files under `pu_repo/`:
 
-   - The cell deletes all current files attached to `PU Repo` and then uploads everything under `pu_repo/`.
+   - The cell deletes all current files attached to `Pentecost University Statute` and then uploads everything under `pu_repo/`.
 
 ---
 

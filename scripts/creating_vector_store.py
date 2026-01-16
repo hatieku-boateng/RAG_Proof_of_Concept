@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 
-load_dotenv()
+load_dotenv(override=True)
 
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
@@ -36,13 +36,13 @@ def create_or_get_vector_store(name: str, description: str | None = None):
     return vs
 
 
-VECTOR_STORE_NAME = "PU Repo"
-VECTOR_STORE_DESCRIPTION = "Pentecost University knowledge base"
+VECTOR_STORE_NAME = "Pentecost University Statute"
+VECTOR_STORE_DESCRIPTION = "Pentecost University Statute knowledge base"
 
 vector_store = None
 
 # Prefer an explicit VECTOR_STORE_ID from the environment only if it actually
-# points to the expected store name ("PU Repo"). Otherwise, fall back to
+# points to the expected store name ("Pentecost University Statute"). Otherwise, fall back to
 # creating or retrieving by name so we always end up on the right store.
 if vector_store_id_env:
     try:

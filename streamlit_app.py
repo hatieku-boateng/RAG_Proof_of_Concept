@@ -8,14 +8,15 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 import time
+from datetime import date
 
 try:
     from streamlit.runtime.scriptrunner import get_script_run_ctx
 except Exception:
     get_script_run_ctx = None
 
-# Load environment variables
-load_dotenv()
+# Load environment variables (project .env should override any OS-level vars)
+load_dotenv(override=True)
 
 if __name__ == "__main__" and get_script_run_ctx is not None and get_script_run_ctx() is None:
     print("This is a Streamlit app. Run it with:")
@@ -26,6 +27,8 @@ api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
     st.error("OPENAI_API_KEY is not set. Add it to your .env file before running the app.")
     st.stop()
+
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD") or os.getenv("ADMIN_PASSORD")
 
 # Page configuration
 st.set_page_config(
@@ -246,6 +249,15 @@ if "selected_vector_store" not in st.session_state:
 if "pending_prompt" not in st.session_state:
     st.session_state.pending_prompt = None
 
+if "user_role" not in st.session_state:
+    st.session_state.user_role = None
+
+if "guest_daily_count" not in st.session_state:
+    st.session_state.guest_daily_count = 0
+
+if "guest_daily_date" not in st.session_state:
+    st.session_state.guest_daily_date = date.today().isoformat()
+
 # Fetch vector stores
 @st.cache_data(ttl=60)
 def fetch_vector_stores():
@@ -269,6 +281,7 @@ Your role is to:
 - Strictly provide accurate, detailed answers based on the documents in the knowledge base only and nothing else.
 - Strictly decline to answer any questions that are not related to the documents in the knowledge base.
 - Your response should be well crafted and easy to understand.
+- You should also be ready to walk users through the documents in the knowledge base step by step steadily
 
 Always prioritize accuracy and cite your sources when answering questions.""",
             model=model_chat,
@@ -358,6 +371,15 @@ def reset_chat_session():
 
 def handle_user_prompt(prompt: str):
     """Handle a user prompt (typed or suggested) and append assistant response."""
+    if st.session_state.user_role == "guest":
+        today_str = date.today().isoformat()
+        if st.session_state.guest_daily_date != today_str:
+            st.session_state.guest_daily_date = today_str
+            st.session_state.guest_daily_count = 0
+        if st.session_state.guest_daily_count >= 25:
+            st.warning("Guest limit reached for today (25 queries). Please come back tomorrow or use admin access.")
+            return
+        st.session_state.guest_daily_count += 1
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     with st.chat_message("user"):
@@ -372,6 +394,28 @@ def handle_user_prompt(prompt: str):
         st.markdown(response)
 
     st.session_state.messages.append({"role": "assistant", "content": response})
+
+if st.session_state.user_role is None:
+    st.markdown("### Access")
+    role_choice = st.radio("Choose how to use the assistant:", ["Guest", "Admin"])
+    if role_choice == "Admin":
+        password_input = st.text_input("Admin password", type="password")
+        if st.button("Login"):
+            if not ADMIN_PASSWORD:
+                st.error("Admin password is not configured in the environment.")
+            elif password_input == ADMIN_PASSWORD:
+                st.session_state.user_role = "admin"
+                st.success("Logged in as admin.")
+                st.rerun()
+            else:
+                st.error("Incorrect admin password.")
+    else:
+        if st.button("Continue as guest"):
+            st.session_state.user_role = "guest"
+            st.session_state.guest_daily_date = date.today().isoformat()
+            st.session_state.guest_daily_count = 0
+            st.rerun()
+    st.stop()
 
 # Sidebar
 with st.sidebar:
@@ -483,6 +527,16 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+if st.session_state.user_role == "guest":
+    today_str = date.today().isoformat()
+    if st.session_state.guest_daily_date != today_str:
+        st.session_state.guest_daily_date = today_str
+        st.session_state.guest_daily_count = 0
+    remaining = max(0, 25 - st.session_state.guest_daily_count)
+    st.info(f"Guest mode: {remaining} of 25 queries remaining today.")
+elif st.session_state.user_role == "admin":
+    st.success("Admin mode: unlimited queries.")
 
 # Check if system is ready
 if not vector_stores:

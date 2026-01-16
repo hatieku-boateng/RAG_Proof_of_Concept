@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 
-load_dotenv()
+load_dotenv(override=True)
 
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
@@ -12,7 +12,7 @@ if not api_key:
 
 vector_store_id = os.getenv("VECTOR_STORE_ID")
 if not vector_store_id:
-    raise RuntimeError("VECTOR_STORE_ID is not set. Update your .env with the PU Repo vector store id.")
+    raise RuntimeError("VECTOR_STORE_ID is not set. Update your .env with the 'Pentecost University Statute' vector store id.")
 
 client = OpenAI(api_key=api_key)
 
