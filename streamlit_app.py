@@ -19,7 +19,7 @@ load_dotenv()
 
 if __name__ == "__main__" and get_script_run_ctx is not None and get_script_run_ctx() is None:
     print("This is a Streamlit app. Run it with:")
-    print("  streamlit run app.py")
+    print("  streamlit run streamlit_app.py")
     raise SystemExit(0)
 
 api_key = os.getenv("OPENAI_API_KEY")

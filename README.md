@@ -45,10 +45,11 @@ At runtime, the app links the selected vector store to the assistant, so the ass
 
 ```text
 OpenAI/
-  app.py                # Streamlit RAG chat UI
-  app_streamlit_backup.py # Backup of the Streamlit app (safe revert)
-  openai_1.ipynb         # Notebook for creating/managing vector stores and uploading documents
-  course_outlines/       # Example document directory
+  streamlit_app.py        # Streamlit RAG chat UI
+  notebooks/
+    openai_1.ipynb        # Notebook for creating/managing vector stores and uploading documents
+  scripts/                # Helper scripts for managing the PU Repo vector store
+  pu_repo/               # Pentecost University document repository (knowledge base sources)
   requirements.txt       # Python dependencies
   web/                   # Next.js (React) frontend + server API routes
   .gitignore             # Excludes .env, .venv, and API keys directory
@@ -155,26 +156,30 @@ npm install
 
 The Streamlit app only queries vector stores that already exist in your OpenAI account.
 
-Use `openai_1.ipynb` to:
+Use `notebooks/openai_1.ipynb` to:
 
-- Create or retrieve a vector store
-- Upload local documents and attach them to the vector store
+- List and optionally delete old vector stores created during experimentation
+- Create or retrieve the main **`PU Repo`** vector store
+- Upload local documents from the `pu_repo/` folder and attach them to `PU Repo`
 - Clear and re-add files (useful when refreshing content)
 
-### Common workflow
+### Common workflow (PU Repo)
 
-1. Open `openai_1.ipynb`
-2. Run cells from the top until it prints `vector_store_id`
-3. Upload documents by setting:
+1. Open `notebooks/openai_1.ipynb`.
+2. Run cells from the top until the helpers are defined.
+3. (Optional) Run the **danger** cell that lists vector stores and, if you set `CONFIRM_DELETE = True`, deletes the old ones (for example `Course outlines` or `my-knowledge-base`).
+4. Run the "Creating a vector store" cell to create or select the `PU Repo` vector store.
+5. Upload documents by either:
 
-```python
-FILE_PATHS = [
-    r"course_outlines\\1.docx",
-]
-```
+   ```python
+   FILE_PATHS = [
+       r"pu_repo\\some_file.docx",
+   ]
+   ```
 
-4. (Optional) refresh all documents from `course_outlines/`
-   - Run the “clear + re-add” cell (it removes all current vector-store files, then uploads everything in that folder)
+   or by using the "clear + re-add" cell to sync **all** files under `pu_repo/`:
+
+   - The cell deletes all current files attached to `PU Repo` and then uploads everything under `pu_repo/`.
 
 ---
 
@@ -185,16 +190,10 @@ FILE_PATHS = [
 Run Streamlit:
 
 ```bash
-streamlit run app.py
+streamlit run streamlit_app.py
 ```
 
 Open the local URL printed by Streamlit.
-
-If you want to revert to the backup copy:
-
-```bash
-streamlit run app_streamlit_backup.py
-```
 
 ### Option B: React (Next.js) app
 
@@ -208,7 +207,7 @@ Then open the local URL printed by Next.js (typically `http://localhost:3000`).
 
 ### Important note
 
-Running `python app.py` will not start Streamlit. This repo includes a guard that prints the correct command.
+Running `python streamlit_app.py` will not start Streamlit. This repo includes a guard that prints the correct command.
 
 ---
 
@@ -239,7 +238,7 @@ When you change the vector store selection:
 
 ### “No vector stores found”
 
-- Create/upload documents using `openai_1.ipynb`
+- Create/upload documents using `notebooks/openai_1.ipynb`
 - Confirm the API key is valid and has quota
 
 ### “Error creating assistant”
