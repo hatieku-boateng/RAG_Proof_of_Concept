@@ -15,8 +15,29 @@ try:
 except Exception:
     get_script_run_ctx = None
 
+
+def _read_env_var_from_file(path: str, key: str) -> str | None:
+    """Lightweight fallback to read a KEY=VALUE pair from a .env file without logging values."""
+    try:
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if not line.startswith(key + "="):
+                    continue
+                return line.split("=", 1)[1].strip()
+    except Exception:
+        return None
+    return None
+
+
 # Load environment variables (project .env should override any OS-level vars)
-load_dotenv(override=True)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ENV_PATH = os.path.join(BASE_DIR, ".env")
+load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 if __name__ == "__main__" and get_script_run_ctx is not None and get_script_run_ctx() is None:
     print("This is a Streamlit app. Run it with:")
@@ -24,11 +45,30 @@ if __name__ == "__main__" and get_script_run_ctx is not None and get_script_run_
     raise SystemExit(0)
 
 api_key = os.getenv("OPENAI_API_KEY")
+
+# Try to override with Streamlit secrets if configured (e.g. on Streamlit Cloud)
+try:
+    api_key = st.secrets["OPENAI_API_KEY"]  # may raise if no secrets file
+except Exception:
+    pass
+
+# Final fallback: read directly from the .env file if nothing else is set
 if not api_key:
-    st.error("OPENAI_API_KEY is not set. Add it to your .env file before running the app.")
+    file_api_key = _read_env_var_from_file(ENV_PATH, "OPENAI_API_KEY")
+    if file_api_key:
+        api_key = file_api_key
+
+if not api_key:
+    st.error(
+        "OPENAI_API_KEY is not set. For local runs, add it to your .env file. "
+        "For Streamlit Cloud, define OPENAI_API_KEY in Settings → Secrets."
+    )
     st.stop()
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD") or os.getenv("ADMIN_PASSORD")
+
+MAX_GUEST_QUERIES_PER_DAY = 25
+_guest_quota_by_id = {}
 
 # Page configuration
 st.set_page_config(
@@ -258,6 +298,9 @@ if "guest_daily_count" not in st.session_state:
 if "guest_daily_date" not in st.session_state:
     st.session_state.guest_daily_date = date.today().isoformat()
 
+if "guest_id" not in st.session_state:
+    st.session_state.guest_id = None
+
 # Fetch vector stores
 @st.cache_data(ttl=60)
 def fetch_vector_stores():
@@ -336,16 +379,59 @@ def get_assistant_response(thread_id, assistant_id, user_message):
         if run.status == 'completed':
             # Retrieve messages
             messages = client.beta.threads.messages.list(thread_id=thread_id)
-            
-            # Get the latest assistant message
+
+            # Get the latest assistant message and collect any file citations
+            latest_assistant = None
             for message in messages.data:
-                if message.role != "assistant":
+                if message.role == "assistant":
+                    latest_assistant = message
+                    break
+
+            if not latest_assistant:
+                return "I couldn't generate a response. Please try again."
+
+            full_text = ""
+            source_file_ids = set()
+
+            for content in latest_assistant.content:
+                if content.type != "text":
                     continue
-                for content in message.content:
-                    if content.type == 'text':
-                        return content.text.value
-            
-            return "I couldn't generate a response. Please try again."
+                text_obj = content.text
+                full_text += text_obj.value
+
+                # Collect file IDs from annotations (file_citation or file_path)
+                annotations = getattr(text_obj, "annotations", []) or []
+                for ann in annotations:
+                    file_id = None
+                    file_citation = getattr(ann, "file_citation", None)
+                    if file_citation is not None:
+                        file_id = getattr(file_citation, "file_id", None)
+                    file_path = getattr(ann, "file_path", None)
+                    if file_path is not None and not file_id:
+                        file_id = getattr(file_path, "file_id", None)
+                    if file_id:
+                        source_file_ids.add(file_id)
+
+            if not full_text:
+                return "I couldn't generate a response. Please try again."
+
+            # Resolve file IDs to document names
+            source_names = []
+            for fid in source_file_ids:
+                try:
+                    f = client.files.retrieve(fid)
+                    filename = getattr(f, "filename", None)
+                    if filename:
+                        source_names.append(filename)
+                except Exception:
+                    continue
+
+            if source_names:
+                unique_names = sorted(set(source_names))
+                sources_block = "\n\n**Sources:**\n" + "\n".join(f"- {name}" for name in unique_names)
+                full_text += sources_block
+
+            return full_text
         if run.status == 'failed':
             return "Error: The assistant run failed. Please try again."
 
@@ -372,14 +458,17 @@ def reset_chat_session():
 def handle_user_prompt(prompt: str):
     """Handle a user prompt (typed or suggested) and append assistant response."""
     if st.session_state.user_role == "guest":
+        guest_id = st.session_state.get("guest_id")
+        if not guest_id:
+            st.error("Guest ID is missing. Please reload the app and log in again as guest.")
+            return
         today_str = date.today().isoformat()
-        if st.session_state.guest_daily_date != today_str:
-            st.session_state.guest_daily_date = today_str
-            st.session_state.guest_daily_count = 0
-        if st.session_state.guest_daily_count >= 25:
+        key = (guest_id, today_str)
+        used = _guest_quota_by_id.get(key, 0)
+        if used >= MAX_GUEST_QUERIES_PER_DAY:
             st.warning("Guest limit reached for today (25 queries). Please come back tomorrow or use admin access.")
             return
-        st.session_state.guest_daily_count += 1
+        _guest_quota_by_id[key] = used + 1
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     with st.chat_message("user"):
@@ -410,11 +499,15 @@ if st.session_state.user_role is None:
             else:
                 st.error("Incorrect admin password.")
     else:
+        guest_id_input = st.text_input("Guest ID (e.g., student index number)")
         if st.button("Continue as guest"):
-            st.session_state.user_role = "guest"
-            st.session_state.guest_daily_date = date.today().isoformat()
-            st.session_state.guest_daily_count = 0
-            st.rerun()
+            guest_id_input = guest_id_input.strip()
+            if not guest_id_input:
+                st.error("Please enter a guest ID before continuing.")
+            else:
+                st.session_state.user_role = "guest"
+                st.session_state.guest_id = guest_id_input
+                st.rerun()
     st.stop()
 
 # Sidebar
@@ -528,16 +621,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if st.session_state.user_role == "guest":
-    today_str = date.today().isoformat()
-    if st.session_state.guest_daily_date != today_str:
-        st.session_state.guest_daily_date = today_str
-        st.session_state.guest_daily_count = 0
-    remaining = max(0, 25 - st.session_state.guest_daily_count)
-    st.info(f"Guest mode: {remaining} of 25 queries remaining today.")
-elif st.session_state.user_role == "admin":
-    st.success("Admin mode: unlimited queries.")
-
 # Check if system is ready
 if not vector_stores:
     st.error("❌ No vector stores available. Please create a vector store in your notebook first.")
@@ -582,3 +665,16 @@ if len(st.session_state.messages) == 0:
         if cols[i % 2].button(question, use_container_width=True):
             st.session_state.pending_prompt = question
             st.rerun()
+
+if st.session_state.user_role == "guest":
+    guest_id = st.session_state.get("guest_id")
+    if guest_id:
+        today_str = date.today().isoformat()
+        key = (guest_id, today_str)
+        used = _guest_quota_by_id.get(key, 0)
+        remaining = max(0, MAX_GUEST_QUERIES_PER_DAY - used)
+        st.info(f"Guest mode ({guest_id}): {remaining} of {MAX_GUEST_QUERIES_PER_DAY} queries remaining today.")
+    else:
+        st.info("Guest mode: remaining daily queries depend on your guest ID.")
+elif st.session_state.user_role == "admin":
+    st.success("Admin mode: unlimited queries.")
