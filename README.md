@@ -51,7 +51,7 @@ OpenAI/
   scripts/                # Helper scripts for managing the PU Repo vector store
   pu_repo/               # Pentecost University document repository (knowledge base sources)
   requirements.txt       # Python dependencies
-  web/                   # Next.js (React) frontend + server API routes
+  web/                   # (Optional) Next.js (React) frontend – not covered in this README
   .gitignore             # Excludes .env, .venv, and API keys directory
   .env                   # Local config (not committed)
 ```
@@ -104,17 +104,6 @@ OPENAI_MODEL_EMBEDDING=text-embedding-3-small
 VECTOR_STORE_ID=vs_...
 ```
 
-### React (Next.js) environment
-
-The React app runs from `web/` and uses Next.js API routes (server-side) to call OpenAI securely.
-
-Create `web/.env.local` (or copy `web/.env.local.example`):
-
-```env
-OPENAI_API_KEY=your_api_key_here
-OPENAI_MODEL=gpt-4o-mini
-```
-
 ### Model selection and cost
 
 - The app reads `OPENAI_MODEL`.
@@ -140,14 +129,6 @@ python -m venv .venv
 
 ```bash
 python -m pip install -r requirements.txt
-```
-
-### Install React (Next.js) dependencies
-
-From inside the `web/` directory:
-
-```bash
-npm install
 ```
 
 ---
@@ -194,16 +175,6 @@ streamlit run streamlit_app.py
 ```
 
 Open the local URL printed by Streamlit.
-
-### Option B: React (Next.js) app
-
-From inside the `web/` directory:
-
-```bash
-npm run dev
-```
-
-Then open the local URL printed by Next.js (typically `http://localhost:3000`).
 
 ### Important note
 
