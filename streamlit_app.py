@@ -58,33 +58,10 @@ if not api_key:
     if file_api_key:
         api_key = file_api_key
 
-
-def _debug_api_key_info() -> None:
-    """Write limited API key/debug info to the sidebar without exposing secrets."""
-    try:
-        secret_keys = list(st.secrets.keys())
-    except Exception as e:
-        secret_keys = [f"ERROR: {e}"]
-
-    info = {
-        "has_api_key": bool(api_key),
-        "api_key_prefix": (api_key[:8] + "...") if api_key else "",
-        "api_key_length": len(api_key) if api_key else 0,
-        "secret_keys": secret_keys,
-    }
-    try:
-        st.sidebar.write("DEBUG_API_KEY", info)
-    except Exception:
-        # If sidebar is not yet available, ignore debug output
-        pass
-
-
-_debug_api_key_info()
-
 if not api_key:
     st.error(
         "OPENAI_API_KEY is not set. For local runs, add it to your .env file. "
-        "For Streamlit Cloud, define OPENAI_API_KEY in Settings → Secrets."
+        "For Streamlit Cloud, define OPENAI_API_KEY in Settings  Secrets."
     )
     st.stop()
 
