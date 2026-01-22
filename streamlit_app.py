@@ -28,9 +28,13 @@ def _read_env_var_from_file(path: str, key: str) -> str | None:
                     continue
                 if not line.startswith(key + "="):
                     continue
-                return line.split("=", 1)[1].strip()
+                value = line.split("=", 1)[1].strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                    value = value[1:-1].strip()
+                return value
     except Exception:
         return None
+
     return None
 
 
@@ -46,11 +50,31 @@ if __name__ == "__main__" and get_script_run_ctx is not None and get_script_run_
 
 api_key = os.getenv("OPENAI_API_KEY")
 
+def _get_openai_api_key_from_secrets() -> str | None:
+    try:
+        if "OPENAI_API_KEY" in st.secrets:
+            v = st.secrets.get("OPENAI_API_KEY")
+            return str(v).strip() if v else None
+
+        if "openai" in st.secrets:
+            section = st.secrets.get("openai")
+            if isinstance(section, dict):
+                v = section.get("api_key") or section.get("OPENAI_API_KEY")
+                return str(v).strip() if v else None
+        if "OPENAI" in st.secrets:
+            section = st.secrets.get("OPENAI")
+            if isinstance(section, dict):
+                v = section.get("api_key") or section.get("OPENAI_API_KEY")
+                return str(v).strip() if v else None
+    except Exception:
+        return None
+    return None
+
+
 # Try to override with Streamlit secrets if configured (e.g. on Streamlit Cloud)
-try:
-    api_key = st.secrets["OPENAI_API_KEY"]  # may raise if no secrets file
-except Exception:
-    pass
+secrets_api_key = _get_openai_api_key_from_secrets()
+if secrets_api_key:
+    api_key = secrets_api_key
 
 # Final fallback: read directly from the .env file if nothing else is set
 if not api_key:
@@ -61,7 +85,7 @@ if not api_key:
 if not api_key:
     st.error(
         "OPENAI_API_KEY is not set. For local runs, add it to your .env file. "
-        "For Streamlit Cloud, define OPENAI_API_KEY in Settings  Secrets."
+        "For Streamlit Cloud, define OPENAI_API_KEY in Settings → Secrets."
     )
     st.stop()
 
