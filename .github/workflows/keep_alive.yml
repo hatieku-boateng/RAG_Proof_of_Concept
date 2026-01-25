@@ -12,4 +12,6 @@ jobs:
     steps:
       - name: Wake Streamlit App
         run: |
-          curl -L https://pu-statute.streamlit.app/
+          echo "Pinging Streamlit app..."
+          curl -L --max-time 60 https://pu-statute.streamlit.app/ || true
+          echo "Done."
