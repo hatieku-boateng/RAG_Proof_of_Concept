@@ -40,7 +40,12 @@ def _read_env_var_from_file(path: str, key: str) -> str | None:
 
 # Load environment variables (project .env should override any OS-level vars)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ENV_PATH = os.path.join(BASE_DIR, ".env")
+PARENT_DIR = os.path.dirname(BASE_DIR)
+
+ENV_PATH = os.path.join(PARENT_DIR, ".env")
+if not os.path.exists(ENV_PATH):
+    ENV_PATH = os.path.join(BASE_DIR, ".env")
+
 load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 if __name__ == "__main__" and get_script_run_ctx is not None and get_script_run_ctx() is None:
@@ -89,7 +94,7 @@ if not api_key:
     )
     st.stop()
 
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD") or os.getenv("ADMIN_PASSORD")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 
 MAX_GUEST_QUERIES_PER_DAY = 25
 _guest_quota_by_id = {}
@@ -174,6 +179,14 @@ st.markdown("""
         border-radius: 14px;
         padding: 0.95rem 1rem;
         margin: 0.75rem 0;
+    }
+
+    .kb-files-title {
+        margin: 1rem 0 0.5rem 0;
+        font-size: 1.35rem;
+        font-weight: 800;
+        line-height: 1.2;
+        color: var(--text);
     }
 
     .stChatMessage {
@@ -336,21 +349,65 @@ def fetch_vector_stores():
         st.error(f"Error fetching vector stores: {e}")
         return []
 
+
+@st.cache_data(ttl=60)
+def fetch_vector_store_files(vector_store_id: str):
+    try:
+        files = client.vector_stores.files.list(vector_store_id=vector_store_id)
+        return getattr(files, "data", [])
+    except Exception as e:
+        st.error(f"Error fetching vector store files: {e}")
+        return []
+
+
+@st.cache_data(ttl=60)
+def fetch_vector_store_filenames_and_types(vector_store_id: str):
+    attached_files = fetch_vector_store_files(vector_store_id)
+    filenames: list[str] = []
+    extensions: set[str] = set()
+
+    for vf in attached_files:
+        fid = getattr(vf, "id", None)
+        if not fid:
+            continue
+        try:
+            f = client.files.retrieve(fid)
+            filename = getattr(f, "filename", None)
+            if not filename:
+                continue
+            filenames.append(filename)
+            ext = os.path.splitext(filename)[1].lower().lstrip(".")
+            if ext:
+                extensions.add(ext)
+        except Exception:
+            continue
+
+    file_types_summary = None
+    if extensions:
+        file_types_summary = ", ".join(sorted({e.upper() for e in extensions}))
+
+    return sorted(set(filenames)), file_types_summary
+
 # Create assistant
-def create_assistant(vector_store_id, vector_store_name):
+def create_assistant(vector_store_id, vector_store_name, file_types_summary: str | None = None):
     """Create an OpenAI assistant with file search capability"""
     try:
+        file_types_line = ""
+        if file_types_summary:
+            file_types_line = f"\n\nThis knowledge base contains the following file types: {file_types_summary}."
+
         assistant = client.beta.assistants.create(
             name=f"Assistant for {vector_store_name}",
             instructions=f"""You are a knowledgeable AI assistant with access to documents in the '{vector_store_name}' knowledge base.
+            {file_types_line}
             
 Your role is to:
 - Strictly provide accurate, detailed answers based on the documents in the knowledge base only and nothing else.
-- Strictly decline to answer any questions that are not related to the documents in the knowledge base.
+- Strictly decline to answer any questions that are not related to the documents in the knowledge base except for when the user ask for links to the documents.
 - Your response should be well crafted and easy to understand.
 - You should also be ready to walk users through the documents in the knowledge base step by step steadily
+-Always prioritize accuracy and cite your sources when answering questions.""",
 
-Always prioritize accuracy and cite your sources when answering questions.""",
             model=model_chat,
             tools=[{"type": "file_search"}],
             tool_resources={
@@ -374,8 +431,79 @@ def create_thread():
         st.error(f"Error creating thread: {e}")
         return None
 
+
+def _is_link_request(user_message: str) -> bool:
+    msg = (user_message or "").strip().lower()
+    if not msg:
+        return False
+
+    triggers = (
+        "link",
+        "links",
+        "url",
+        "urls",
+        "source",
+        "sources",
+        "view source",
+        "download",
+        "where can i find",
+        "where can i get",
+    )
+    return any(t in msg for t in triggers)
+
+
+def _build_knowledge_base_links_block(vector_store_id: str) -> str:
+    try:
+        attached_files = client.vector_stores.files.list(vector_store_id=vector_store_id)
+        data = getattr(attached_files, "data", []) or []
+    except Exception:
+        data = []
+
+    links: list[tuple[str, str]] = []
+    for vf in data:
+        fid = getattr(vf, "id", None)
+        if not fid:
+            continue
+
+        filename = None
+        try:
+            f = client.files.retrieve(fid)
+            filename = getattr(f, "filename", None)
+        except Exception:
+            filename = None
+
+        try:
+            vs_file = client.vector_stores.files.retrieve(
+                vector_store_id=vector_store_id,
+                file_id=fid,
+            )
+            attrs = getattr(vs_file, "attributes", None) or {}
+            if not isinstance(attrs, dict):
+                continue
+            display_name = attrs.get("doc") or filename
+            url = attrs.get("view_source_url") or attrs.get("source_url")
+            if display_name and url:
+                links.append((display_name, url))
+        except Exception:
+            continue
+
+    if not links:
+        return ""
+
+    unique = []
+    seen = set()
+    for name, url in sorted(links, key=lambda x: (x[0], x[1])):
+        key = (name, url)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append((name, url))
+
+    lines = [f"- [View source: {name}]({url})" for name, url in unique]
+    return "\n\n**Document links:**\n" + "\n".join(lines)
+
 # Get assistant response
-def get_assistant_response(thread_id, assistant_id, user_message):
+def get_assistant_response(thread_id, assistant_id, user_message, vector_store_id):
     """Get response from the assistant"""
     try:
         # Add user message to thread
@@ -439,21 +567,59 @@ def get_assistant_response(thread_id, assistant_id, user_message):
             if not full_text:
                 return "I couldn't generate a response. Please try again."
 
-            # Resolve file IDs to document names
-            source_names = []
+            # Resolve file IDs to document names + source URLs (if present on vector store file attributes)
+            sources: list[tuple[str, str | None]] = []
             for fid in source_file_ids:
+                filename = None
                 try:
                     f = client.files.retrieve(fid)
                     filename = getattr(f, "filename", None)
-                    if filename:
-                        source_names.append(filename)
                 except Exception:
-                    continue
+                    filename = None
 
-            if source_names:
-                unique_names = sorted(set(source_names))
-                sources_block = "\n\n**Sources:**\n" + "\n".join(f"- {name}" for name in unique_names)
+                source_url = None
+                doc_title = None
+                if vector_store_id:
+                    try:
+                        vs_file = client.vector_stores.files.retrieve(
+                            vector_store_id=vector_store_id,
+                            file_id=fid,
+                        )
+                        attrs = getattr(vs_file, "attributes", None) or {}
+                        if isinstance(attrs, dict):
+                            doc_title = attrs.get("doc")
+                            source_url = attrs.get("view_source_url") or attrs.get("source_url")
+                    except Exception:
+                        source_url = None
+
+                display_name = doc_title or filename
+                if display_name:
+                    sources.append((display_name, source_url))
+
+            if sources:
+                unique = []
+                seen = set()
+                for name, url in sorted(sources, key=lambda x: (x[0], x[1] or "")):
+                    key = (name, url or "")
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    unique.append((name, url))
+
+                lines = []
+                for name, url in unique:
+                    if url:
+                        lines.append(f"- [View source: {name}]({url})")
+                    else:
+                        lines.append(f"- {name}")
+
+                sources_block = "\n\n**Sources:**\n" + "\n".join(lines)
                 full_text += sources_block
+
+            if vector_store_id and _is_link_request(user_message):
+                kb_links_block = _build_knowledge_base_links_block(vector_store_id)
+                if kb_links_block:
+                    full_text += kb_links_block
 
             return full_text
         if run.status == 'failed':
@@ -503,6 +669,7 @@ def handle_user_prompt(prompt: str):
             st.session_state.thread_id,
             st.session_state.assistant_id,
             prompt,
+            st.session_state.selected_vector_store,
         )
         st.markdown(response)
 
@@ -566,6 +733,7 @@ with st.sidebar:
         )
         
         selected_store = vector_store_options[selected_store_name]
+        st.session_state.selected_store_name = selected_store.name
         
         # Display vector store info
         st.markdown(f"""
@@ -576,6 +744,16 @@ with st.sidebar:
             <strong>Status:</strong> {selected_store.status}
         </div>
         """, unsafe_allow_html=True)
+
+        st.subheader("📁 Files in this Knowledge Base")
+
+        filenames, file_types_summary = fetch_vector_store_filenames_and_types(selected_store.id)
+
+        if not filenames:
+            st.caption("No files attached to this knowledge base.")
+        else:
+            for name in filenames:
+                st.markdown(f"- {name}")
         
         # Initialize or update assistant when vector store changes
         if st.session_state.selected_vector_store != selected_store.id:
@@ -592,7 +770,8 @@ with st.sidebar:
             with st.spinner("Initializing assistant..."):
                 st.session_state.assistant_id = create_assistant(
                     selected_store.id, 
-                    selected_store.name
+                    selected_store.name,
+                    file_types_summary=file_types_summary,
                 )
                 reset_chat_session()
             
@@ -634,16 +813,22 @@ with st.sidebar:
         """)
 
 # Main content
-st.markdown(
-    f"""
-    <div class="pu-hero">
-        <div class="pu-hero-title">AI Knowledge Assistant</div>
-        <div class="pu-hero-subtitle">Ask questions about your uploaded documents. The assistant retrieves relevant passages from the selected knowledge base and answers using RAG.</div>
-        <div class="pu-badge">🎓 Pentecost University • Proof of Concept</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+kb_id = st.session_state.get("selected_vector_store")
+
+kb_files: list[str] = []
+if kb_id:
+    try:
+        kb_files, _ = fetch_vector_store_filenames_and_types(kb_id)
+    except Exception:
+        kb_files = []
+
+kb_files_line = ""
+if kb_files:
+    kb_files_line = "\n".join(f"- {name}" for name in kb_files)
+
+if kb_files_line:
+    st.markdown('<div class="kb-files-title">📚 Files in the selected knowledge base</div>', unsafe_allow_html=True)
+    st.markdown(kb_files_line)
 
 # Check if system is ready
 if not vector_stores:

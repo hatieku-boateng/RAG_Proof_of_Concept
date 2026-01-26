@@ -1,11 +1,19 @@
 
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import OpenAI
 
 
-load_dotenv(override=True)
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+PARENT_DIR = PROJECT_DIR.parent
+
+ENV_PATH = PARENT_DIR / ".env"
+if not ENV_PATH.exists():
+    ENV_PATH = PROJECT_DIR / ".env"
+
+load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
